@@ -1,5 +1,11 @@
 # sub-cat
 
+<p align="center">
+  <img src="assets/hero.png" alt="애용이 코드 위를 사뿐사뿐 걷는 모습" width="720" />
+</p>
+
+<p align="center"><em>사뿐… 바탕화면을 순찰하는 보스 고양이 <strong>밍</strong></em></p>
+
 바탕화면을 순찰하는 근육질 보스 고양이 에이전트 **밍**을 만드는 프로젝트입니다.
 
 현재 버전은 Python `tkinter`로 투명한 항상-위 창을 만들고, OpenAI API를 연결하면 사용자가 말을 걸 때만 밍이 바탕화면을 보고 거친 말투로 답합니다. 화면 캡처는 Windows 기본 API로 처리하고, 이미지는 OpenAI Responses API에 전송됩니다.
