@@ -46,6 +46,19 @@ def save_cat_name(name: str) -> None:
     save_user_config(cfg)
 
 
+def load_mischief_enabled() -> bool:
+    value = load_user_config().get("mischief_enabled")
+    if value is None:
+        return True
+    return bool(value)
+
+
+def save_mischief_enabled(enabled: bool) -> None:
+    cfg = load_user_config()
+    cfg["mischief_enabled"] = bool(enabled)
+    save_user_config(cfg)
+
+
 def has_jongseong(ch: str) -> bool:
     """한글 마지막 글자에 받침이 있는지. 한글 음절은 0xAC00~0xD7A3."""
     if not ch:

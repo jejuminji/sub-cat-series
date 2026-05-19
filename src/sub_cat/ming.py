@@ -16,9 +16,11 @@ from tkinter import simpledialog
 from .config import (
     DEFAULT_CAT_NAME,
     load_cat_name,
+    load_mischief_enabled,
     load_user_config,
     particle_gwa,
     save_cat_name,
+    save_mischief_enabled,
     save_user_config,
 )
 from .conversation import MingChatClient
@@ -375,6 +377,7 @@ class MingDesktopAgent:
 
     def __init__(self) -> None:
         self.cat_name = load_cat_name()
+        self.mischief_enabled = load_mischief_enabled()
         if not os.getenv("OPENAI_API_KEY"):
             stored_key = (load_user_config().get("openai_api_key") or "").strip()
             if stored_key:
@@ -470,9 +473,19 @@ class MingDesktopAgent:
         self.menu.add_cascade(label="캐릭터 선택", menu=self.style_menu)
         self.menu.add_command(label="이름 바꾸기...", command=self.rename_cat)
         self.menu.add_separator()
+        if not hasattr(self, "mischief_enabled_var"):
+            self.mischief_enabled_var = tk.BooleanVar(value=self.mischief_enabled)
+        else:
+            self.mischief_enabled_var.set(self.mischief_enabled)
         self.settings_menu = tk.Menu(self.menu, tearoff=False)
         self.settings_menu.add_command(label="OpenAI API 키 설정...", command=self.set_api_key)
         self.settings_menu.add_command(label="OpenAI API 키 삭제", command=self.clear_api_key)
+        self.settings_menu.add_separator()
+        self.settings_menu.add_checkbutton(
+            label="장난 허용",
+            variable=self.mischief_enabled_var,
+            command=self.toggle_mischief,
+        )
         self.menu.add_cascade(label="설정", menu=self.settings_menu)
         self.menu.add_separator()
         self.mischief_menu = tk.Menu(self.menu, tearoff=False)
@@ -486,7 +499,8 @@ class MingDesktopAgent:
                 )
         else:
             self.mischief_menu.add_command(label="(의존성 누락)", state="disabled")
-        self.menu.add_cascade(label="장난", menu=self.mischief_menu)
+        mischief_label = "장난" if self.mischief_enabled else "장난 (꺼짐)"
+        self.menu.add_cascade(label=mischief_label, menu=self.mischief_menu)
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.root.destroy)
 
@@ -594,6 +608,9 @@ class MingDesktopAgent:
         self._say(self._style_line("nap"))
 
     def _mischief_random(self) -> None:
+        if not self.mischief_enabled:
+            self._say("장난 꺼짐")
+            return
         if not self.mischief.actions:
             self._say("의존성 없음")
             return
@@ -605,8 +622,21 @@ class MingDesktopAgent:
         self._say(f"{name} {'OK' if ok else 'X'}", ticks=120)
 
     def _mischief_run(self, label: str, fn) -> None:
+        if not self.mischief_enabled:
+            self._say("장난 꺼짐")
+            return
         self._show_mark(MARK_ALERT, ticks=47)
         self.root.after(450, lambda: self._mischief_run_execute(label, fn))
+
+    def toggle_mischief(self) -> None:
+        self.mischief_enabled = bool(self.mischief_enabled_var.get())
+        try:
+            save_mischief_enabled(self.mischief_enabled)
+        except OSError:
+            self._say("저장 실패")
+            return
+        self._build_menu()
+        self._say("장난 켰다" if self.mischief_enabled else "장난 껐다")
 
     def _mischief_run_execute(self, label: str, fn) -> None:
         ok = fn()
