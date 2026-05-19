@@ -7,8 +7,14 @@ import threading
 import tkinter as tk
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from .conversation import MingChatClient
+from .mischief import MischiefEngine
+from .sprites import SpriteSet
+
+
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 
 
 TRANSPARENT = "#ff00ff"
@@ -212,6 +218,7 @@ class MingState:
     dragging: bool = False
     drag_dx: int = 0
     drag_dy: int = 0
+    shiver_ticks: int = 0
 
 
 class MingDesktopAgent:
@@ -263,9 +270,20 @@ class MingDesktopAgent:
         self.chat_log: tk.Text | None = None
         self.chat_entry: tk.Entry | None = None
         self.chat_send_button: tk.Button | None = None
-        self.cat_style = CatStyle.BOSS
+
+        self.sprites: dict[CatStyle, SpriteSet] = {}
+        for style in CatStyle:
+            sprite_folder = ASSETS_DIR / style.value
+            if sprite_folder.exists():
+                sprite_set = SpriteSet(sprite_folder)
+                if sprite_set.available:
+                    self.sprites[style] = sprite_set
+
+        self.cat_style = CatStyle.AEYONG if CatStyle.AEYONG in self.sprites else CatStyle.BOSS
         self.cat_style_var = tk.StringVar(value=self.cat_style.value)
         self._apply_cat_style(self.cat_style, announce=False)
+
+        self.mischief = MischiefEngine(self.root, screen_w, screen_h)
 
         self._build_menu()
         self._bind_events()
@@ -292,6 +310,19 @@ class MingDesktopAgent:
                 command=self.change_cat_style,
             )
         self.menu.add_cascade(label="고양이 선택", menu=self.style_menu)
+        self.menu.add_separator()
+        self.mischief_menu = tk.Menu(self.menu, tearoff=False)
+        self.mischief_menu.add_command(label="무작위", command=self._mischief_random)
+        if self.mischief.actions:
+            self.mischief_menu.add_separator()
+            for label, fn in self.mischief.actions.items():
+                self.mischief_menu.add_command(
+                    label=label,
+                    command=lambda f=fn, l=label: self._mischief_run(l, f),
+                )
+        else:
+            self.mischief_menu.add_command(label="(의존성 누락)", state="disabled")
+        self.menu.add_cascade(label="장난", menu=self.mischief_menu)
         self.menu.add_separator()
         self.menu.add_command(label="종료", command=self.root.destroy)
 
@@ -322,6 +353,17 @@ class MingDesktopAgent:
         self.state.vx = 0
         self.state.mood_ticks = 360
         self._say(self._style_line("nap"))
+
+    def _mischief_random(self) -> None:
+        if not self.mischief.actions:
+            self._say("의존성 없음")
+            return
+        name, ok = self.mischief.trigger_random()
+        self._say(f"{name} {'OK' if ok else 'X'}", ticks=120)
+
+    def _mischief_run(self, label: str, fn) -> None:
+        ok = fn()
+        self._say(f"{label} {'OK' if ok else 'X'}", ticks=120)
 
     def change_cat_style(self) -> None:
         try:
@@ -524,6 +566,7 @@ class MingDesktopAgent:
         self.state.y = min(self.state.y, self.floor_y)
         self.state.mood = Mood.IDLE
         self.state.mood_ticks = 80
+        self.state.shiver_ticks = 28
         self._say(self._style_line("land"))
 
     def _tick(self) -> None:
@@ -544,6 +587,9 @@ class MingDesktopAgent:
             state.speech_ticks -= 1
         else:
             state.speech = ""
+
+        if state.shiver_ticks > 0:
+            state.shiver_ticks -= 1
 
         if state.mood_ticks <= 0:
             self._roll_next_mood()
@@ -628,6 +674,7 @@ class MingDesktopAgent:
         if self.state.y >= self.floor_y:
             self.state.y = self.floor_y
             self.state.vy = -5.8
+            self.state.shiver_ticks = max(self.state.shiver_ticks, 14)
             if random.random() < 0.18:
                 self.state.mood = Mood.IDLE
                 self.state.mood_ticks = 55
@@ -669,16 +716,72 @@ class MingDesktopAgent:
 
     def _draw(self) -> None:
         self.canvas.delete("all")
-        pose = self._pose()
-        bob = pose["bob"]
-        step = pose["step"]
         sleepy = self.state.mood == Mood.NAP
 
-        self._draw_shadow(bob)
-        self._draw_tail(bob, step, sleepy)
-        self._draw_body(bob, step, sleepy)
-        self._draw_head(bob, step, sleepy)
+        sprite_set = self.sprites.get(self.cat_style)
+        if sprite_set is not None:
+            self._draw_sprite_layer(sprite_set, sleepy)
+        else:
+            pose = self._pose()
+            bob = pose["bob"]
+            step = pose["step"]
+            self._draw_shadow(bob)
+            self._draw_tail(bob, step, sleepy)
+            self._draw_body(bob, step, sleepy)
+            self._draw_head(bob, step, sleepy)
         self._draw_speech()
+
+    def _pick_sprite_pose(self, sleepy: bool, moving: bool) -> str:
+        state = self.state
+        if sleepy:
+            return "nap"
+        if state.dragging:
+            return "alert"
+        if state.mood == Mood.POUNCE:
+            return "play"
+        if moving:
+            return "walk"
+        if self.chat_window is not None and self.chat_window.winfo_exists():
+            return "talk"
+        if state.mood == Mood.FOLLOW:
+            return "alert"
+        return "idle"
+
+    def _draw_sprite_layer(self, sprite_set: SpriteSet, sleepy: bool) -> None:
+        state = self.state
+        moving = abs(state.vx) + abs(state.vy) > 0.9 and not sleepy
+
+        if sleepy:
+            breath = math.sin(state.frame / 36) * 3.0
+        elif moving:
+            breath = abs(math.sin(state.frame / 3.4)) * 3.5
+        else:
+            breath = math.sin(state.frame / 22) * 2.0
+
+        shake_x = 0.0
+        shake_y = 0.0
+        if state.shiver_ticks > 0:
+            shake_x = random.uniform(-2.5, 2.5)
+            shake_y = random.uniform(-1.5, 1.5)
+
+        cx = self.width / 2 + shake_x
+        cy = self.height / 2 + breath + shake_y
+
+        self.canvas.create_oval(
+            self.width / 2 - 46,
+            self.height - 17 + breath * 0.18,
+            self.width / 2 + 46,
+            self.height - 7 + breath * 0.18,
+            fill=SHADOW,
+            outline="",
+            stipple="gray50",
+        )
+
+        pose_name = self._pick_sprite_pose(sleepy, moving)
+        photo = sprite_set.photo(pose_name, state.facing)
+        if photo is None:
+            return
+        self.canvas.create_image(cx, cy, image=photo)
 
     def _pose(self) -> dict[str, float]:
         moving = abs(self.state.vx) + abs(self.state.vy) > 0.9 and self.state.mood != Mood.NAP
