@@ -1,7 +1,7 @@
 # sub-cat
 
 <p align="center">
-  <img src="assets/banner.png" alt="sub-cat banner: 마법소녀 · 로봇 · 냥냥이" width="720" />
+  <img src="assets/banner.gif" alt="sub-cat banner: 마법소녀 · 로봇 · 냥냥이" width="720" />
 </p>
 
 <p align="center"><em>바탕화면에 사는 작은 펫 — 냥냥이 · 마법소녀 · 로봇</em></p>
