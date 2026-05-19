@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import os
 import queue
 import math
 import random
 import threading
 import tkinter as tk
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
+from tkinter import simpledialog
+
+from .config import (
+    DEFAULT_CAT_NAME,
+    load_cat_name,
+    load_user_config,
+    particle_gwa,
+    save_cat_name,
+    save_user_config,
+)
 from .conversation import MingChatClient
 from .mischief import MischiefEngine
 from .sprites import SpriteSet
@@ -19,6 +31,24 @@ ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 
 TRANSPARENT = "#ff00ff"
 INK = "#170f0d"
+CHAT_BG_DEFAULT = "#b2c7d9"  # 카카오톡 채팅 배경 톤 (스타일 팔레트가 없을 때)
+CHAT_BUBBLE_USER_DEFAULT = "#cfe8ff"
+CHAT_BUBBLE_MING_DEFAULT = "#ffffff"
+CHAT_BUBBLE_MAX_WIDTH = 240
+CHAT_CANVAS_WIDTH = 360
+CHAT_META_FG_DEFAULT = "#5f7384"
+CHAT_UNREAD_FG_DEFAULT = "#f1c20a"
+
+# Head-mark kinds (밍 머리 위에 잠깐 떠오르는 마크).
+MARK_ALERT = "alert"
+MARK_ZZZ = "zzz"
+MARK_HEART = "heart"
+MARK_QUESTION = "question"
+
+ALERT_RED = "#e0223a"
+MARK_HEART_PINK = "#ff6b8a"
+MARK_QUESTION_YELLOW = "#f4b400"
+MARK_ZZZ_GRAY = "#5f6770"
 FUR = "#9b7650"
 FUR_DARK = "#4c3527"
 FUR_LIGHT = "#c59a65"
@@ -45,15 +75,32 @@ class CatStyle(str, Enum):
     NORMAL = "normal"
     ODDEYE = "oddeye"
     AEYONG = "aeyong"
+    ROBOT = "robot"
+
+
+# 스프라이트 디렉토리명이 enum value 와 다른 경우 매핑.
+# (사용자가 assets/magical-girl 로 폴더를 만들었기 때문에 매핑 사용)
+STYLE_SPRITE_DIRS: dict["CatStyle", str] = {
+    CatStyle.MAGICAL: "magical-girl",
+}
+
+
+# 우클릭 → "캐릭터 선택" 에 노출할 스타일. 나머지는 코드에 남아있지만 메뉴에선 숨김.
+VISIBLE_STYLES: list["CatStyle"] = [
+    CatStyle.AEYONG,
+    CatStyle.MAGICAL,
+    CatStyle.ROBOT,
+]
 
 
 STYLE_LABELS = {
     CatStyle.BOSS: "보스냥",
-    CatStyle.MAGICAL: "마법소녀냥",
+    CatStyle.MAGICAL: "마법소녀",
     CatStyle.GLAM: "섹시냥",
     CatStyle.NORMAL: "일반냥",
     CatStyle.ODDEYE: "오드아이냥",
-    CatStyle.AEYONG: "애용",
+    CatStyle.AEYONG: "냥냥이",
+    CatStyle.ROBOT: "로봇",
 }
 
 
@@ -118,7 +165,89 @@ STYLE_PALETTES = {
         "metal": "#b7d9e6",
         "muscle": "#d8cdbd",
     },
+    CatStyle.ROBOT: {
+        "fur": "#9ea7b3",
+        "fur_dark": "#3c4651",
+        "fur_light": "#dfe5ed",
+        "scarf": "#28c0e5",
+        "cheek": "#ff8a3b",
+        "claw": "#e6ecf3",
+        "metal": "#cfd6df",
+        "muscle": "#6f7a87",
+    },
 }
+
+
+# 채팅창 톤. 누락 키는 default 로 폴백.
+STYLE_CHAT_PALETTES: dict["CatStyle", dict[str, str]] = {
+    CatStyle.BOSS: {
+        "bg": "#3a2a26",
+        "bubble_ming": "#ece1d2",
+        "bubble_user": "#d6dde2",
+        "ming_fg": "#1a1110",
+        "user_fg": "#101418",
+        "meta_fg": "#a8a3a0",
+        "unread_fg": "#f4c95b",
+    },
+    CatStyle.MAGICAL: {
+        "bg": "#f7d4e6",
+        "bubble_ming": "#fff0f7",
+        "bubble_user": "#dff3e6",
+        "ming_fg": "#5b1a4d",
+        "user_fg": "#1f4d3b",
+        "meta_fg": "#a37c92",
+        "unread_fg": "#d735a8",
+    },
+    CatStyle.GLAM: {
+        "bg": "#2a181d",
+        "bubble_ming": "#f4e4d0",
+        "bubble_user": "#f6d1a8",
+        "ming_fg": "#1a0d10",
+        "user_fg": "#3a1f10",
+        "meta_fg": "#a89084",
+        "unread_fg": "#ffd166",
+    },
+    CatStyle.NORMAL: {
+        "bg": "#ffe6b8",
+        "bubble_ming": "#ffffff",
+        "bubble_user": "#cfe8ff",
+        "ming_fg": INK,
+        "user_fg": INK,
+        "meta_fg": "#9a8a6a",
+        "unread_fg": "#e08a1b",
+    },
+    CatStyle.ODDEYE: {
+        "bg": "#cfd8de",
+        "bubble_ming": "#ffffff",
+        "bubble_user": "#e0d7f5",
+        "ming_fg": INK,
+        "user_fg": INK,
+        "meta_fg": "#7a8088",
+        "unread_fg": "#37bdf8",
+    },
+    CatStyle.AEYONG: {
+        "bg": "#b2c7d9",
+        "bubble_ming": "#ffffff",
+        "bubble_user": "#cfe8ff",
+        "ming_fg": INK,
+        "user_fg": INK,
+        "meta_fg": "#5f7384",
+        "unread_fg": "#f1c20a",
+    },
+    CatStyle.ROBOT: {
+        "bg": "#1f2a36",
+        "bubble_ming": "#e6ecf3",
+        "bubble_user": "#28c0e5",
+        "ming_fg": "#1a1110",
+        "user_fg": "#06222a",
+        "meta_fg": "#8ea0b3",
+        "unread_fg": "#ff8a3b",
+    },
+}
+
+
+def chat_palette(style: "CatStyle") -> dict[str, str]:
+    return STYLE_CHAT_PALETTES.get(style, STYLE_CHAT_PALETTES[CatStyle.AEYONG])
 
 
 STYLE_LINES = {
@@ -200,6 +329,19 @@ STYLE_LINES = {
         "select": "애용 모드",
         "chat": "사진 속 애용을 닮은 흰 크림 장모 고양이. 큰 푸른 눈으로 조용하고 다정하게 바라보는 말투",
     },
+    CatStyle.ROBOT: {
+        "enter": "기동 완료.",
+        "hover": ["스캔 중...", "신호 양호", "사용자 식별"],
+        "call": "호출 수신",
+        "wander": "순찰 루틴 실행",
+        "nap": "절전 모드 진입",
+        "drag": "위치 조정 감지",
+        "land": "착지. 안정.",
+        "idle": ["대기 중", "신호 양호", "주변 감시"],
+        "follow": ["접근 중", "추적 시작", "거리 단축"],
+        "select": "로봇 모드",
+        "chat": "로봇 펫. 짧은 문장, 약간 기계적인 어조, 효율적인 정보 전달 말투",
+    },
 }
 
 
@@ -219,6 +361,8 @@ class MingState:
     drag_dx: int = 0
     drag_dy: int = 0
     shiver_ticks: int = 0
+    mark_kind: str = ""
+    mark_ticks: int = 0
 
 
 class MingDesktopAgent:
@@ -230,8 +374,13 @@ class MingDesktopAgent:
     floor_margin = 78
 
     def __init__(self) -> None:
+        self.cat_name = load_cat_name()
+        if not os.getenv("OPENAI_API_KEY"):
+            stored_key = (load_user_config().get("openai_api_key") or "").strip()
+            if stored_key:
+                os.environ["OPENAI_API_KEY"] = stored_key
         self.root = tk.Tk()
-        self.root.title("sub-cat: Ming")
+        self.root.title(f"sub-cat: {self.cat_name}")
         self.root.overrideredirect(True)
         self.root.resizable(False, False)
         self.root.configure(bg=TRANSPARENT)
@@ -267,13 +416,22 @@ class MingDesktopAgent:
         self.chat_busy = False
         self.chat_results: queue.Queue[str] = queue.Queue()
         self.chat_window: tk.Toplevel | None = None
-        self.chat_log: tk.Text | None = None
+        self.chat_outer: tk.Frame | None = None
+        self.chat_log_area: tk.Frame | None = None
+        self.chat_controls: tk.Frame | None = None
+        self.chat_canvas: tk.Canvas | None = None
+        self.chat_scroll: tk.Scrollbar | None = None
+        self.chat_messages_frame: tk.Frame | None = None
+        self.chat_messages_window: int | None = None
         self.chat_entry: tk.Entry | None = None
         self.chat_send_button: tk.Button | None = None
+        self.chat_notice: tk.Label | None = None
+        self.chat_rows: list[dict] = []
+        self.pending_unread_labels: list[tk.Label] = []
 
         self.sprites: dict[CatStyle, SpriteSet] = {}
         for style in CatStyle:
-            sprite_folder = ASSETS_DIR / style.value
+            sprite_folder = ASSETS_DIR / STYLE_SPRITE_DIRS.get(style, style.value)
             if sprite_folder.exists():
                 sprite_set = SpriteSet(sprite_folder)
                 if sprite_set.available:
@@ -296,20 +454,26 @@ class MingDesktopAgent:
 
     def _build_menu(self) -> None:
         self.menu = tk.Menu(self.root, tearoff=False)
-        self.menu.add_command(label="밍 부르기", command=self.call_ming)
+        self.menu.add_command(label=f"{self.cat_name} 부르기", command=self.call_ming)
         self.menu.add_command(label="대화하기", command=self.open_chat)
         self.menu.add_command(label="순찰 모드", command=self.wander)
         self.menu.add_command(label="기절잠", command=self.nap)
         self.menu.add_separator()
         self.style_menu = tk.Menu(self.menu, tearoff=False)
-        for style, label in STYLE_LABELS.items():
+        for style in VISIBLE_STYLES:
             self.style_menu.add_radiobutton(
-                label=label,
+                label=STYLE_LABELS[style],
                 value=style.value,
                 variable=self.cat_style_var,
                 command=self.change_cat_style,
             )
-        self.menu.add_cascade(label="고양이 선택", menu=self.style_menu)
+        self.menu.add_cascade(label="캐릭터 선택", menu=self.style_menu)
+        self.menu.add_command(label="이름 바꾸기...", command=self.rename_cat)
+        self.menu.add_separator()
+        self.settings_menu = tk.Menu(self.menu, tearoff=False)
+        self.settings_menu.add_command(label="OpenAI API 키 설정...", command=self.set_api_key)
+        self.settings_menu.add_command(label="OpenAI API 키 삭제", command=self.clear_api_key)
+        self.menu.add_cascade(label="설정", menu=self.settings_menu)
         self.menu.add_separator()
         self.mischief_menu = tk.Menu(self.menu, tearoff=False)
         self.mischief_menu.add_command(label="무작위", command=self._mischief_random)
@@ -338,7 +502,81 @@ class MingDesktopAgent:
         self.follow_enabled = True
         self.state.mood = Mood.FOLLOW
         self.state.mood_ticks = 260
+        self._show_mark(MARK_HEART, ticks=70)
         self._say(self._style_line("call"))
+
+    def rename_cat(self) -> None:
+        new = simpledialog.askstring(
+            "이름 바꾸기",
+            f"새 이름을 입력해 (현재: {self.cat_name})",
+            initialvalue=self.cat_name,
+            parent=self.root,
+        )
+        if new is None:
+            return
+        new = new.strip()
+        if not new:
+            self._say("이름이 비었다")
+            return
+        if len(new) > 16:
+            new = new[:16]
+        if new == self.cat_name:
+            return
+        self.cat_name = new
+        try:
+            save_cat_name(new)
+        except OSError:
+            self._say("저장 실패")
+            return
+        self._refresh_cat_name_ui()
+        self._say(f"이제부터 {new}")
+
+    def _refresh_cat_name_ui(self) -> None:
+        self.root.title(f"sub-cat: {self.cat_name}")
+        self._build_menu()
+        if self.chat_window and self.chat_window.winfo_exists():
+            self.chat_window.title(
+                f"{self.cat_name}{particle_gwa(self.cat_name)} 대화"
+            )
+
+    def set_api_key(self) -> None:
+        current = os.getenv("OPENAI_API_KEY", "")
+        masked = (current[:4] + "…" + current[-4:]) if len(current) >= 10 else ("(없음)" if not current else "(짧음)")
+        new = simpledialog.askstring(
+            "OpenAI API 키 설정",
+            f"sk-... 로 시작하는 키를 붙여넣어줘.\n현재: {masked}\n(취소하면 변경하지 않음)",
+            initialvalue=current,
+            parent=self.root,
+            show="*",
+        )
+        if new is None:
+            return
+        new = new.strip()
+        if not new:
+            self._say("키가 비었다")
+            return
+        try:
+            cfg = load_user_config()
+            cfg["openai_api_key"] = new
+            save_user_config(cfg)
+        except OSError:
+            self._say("저장 실패")
+            return
+        os.environ["OPENAI_API_KEY"] = new
+        self._say("키 등록 완료")
+
+    def clear_api_key(self) -> None:
+        try:
+            cfg = load_user_config()
+            if "openai_api_key" in cfg:
+                del cfg["openai_api_key"]
+                save_user_config(cfg)
+        except OSError:
+            self._say("저장 실패")
+            return
+        if "OPENAI_API_KEY" in os.environ:
+            del os.environ["OPENAI_API_KEY"]
+        self._say("키 삭제 완료")
 
     def wander(self) -> None:
         self.follow_enabled = False
@@ -352,18 +590,31 @@ class MingDesktopAgent:
         self.state.mood = Mood.NAP
         self.state.vx = 0
         self.state.mood_ticks = 360
+        self._show_mark(MARK_ZZZ, ticks=120)
         self._say(self._style_line("nap"))
 
     def _mischief_random(self) -> None:
         if not self.mischief.actions:
             self._say("의존성 없음")
             return
+        self._show_mark(MARK_ALERT, ticks=47)
+        self.root.after(450, self._mischief_random_execute)
+
+    def _mischief_random_execute(self) -> None:
         name, ok = self.mischief.trigger_random()
         self._say(f"{name} {'OK' if ok else 'X'}", ticks=120)
 
     def _mischief_run(self, label: str, fn) -> None:
+        self._show_mark(MARK_ALERT, ticks=47)
+        self.root.after(450, lambda: self._mischief_run_execute(label, fn))
+
+    def _mischief_run_execute(self, label: str, fn) -> None:
         ok = fn()
         self._say(f"{label} {'OK' if ok else 'X'}", ticks=120)
+
+    def _show_mark(self, kind: str, ticks: int = 47) -> None:
+        self.state.mark_kind = kind
+        self.state.mark_ticks = ticks
 
     def change_cat_style(self) -> None:
         try:
@@ -388,6 +639,7 @@ class MingDesktopAgent:
         MUSCLE_LINE = palette["muscle"]
         if self.chat_send_button:
             self.chat_send_button.configure(bg=SCARF, activebackground=SCARF)
+        self._apply_chat_palette()
         if announce:
             self._say(self._style_line("select"), ticks=130)
 
@@ -409,42 +661,63 @@ class MingDesktopAgent:
             self._say("말해봐")
             return
 
+        palette = chat_palette(self.cat_style)
+
         self.chat_window = tk.Toplevel(self.root)
-        self.chat_window.title("밍과 대화")
+        self.chat_window.title(f"{self.cat_name}{particle_gwa(self.cat_name)} 대화")
         self.chat_window.geometry(self._chat_geometry())
         self.chat_window.resizable(False, False)
-        self.chat_window.configure(bg="#241817")
+        self.chat_window.configure(bg=palette["bg"])
         self.chat_window.wm_attributes("-topmost", True)
         self.chat_window.protocol("WM_DELETE_WINDOW", self._close_chat)
 
-        frame = tk.Frame(self.chat_window, bg="#241817", padx=10, pady=10)
-        frame.pack(fill="both", expand=True)
+        self.chat_outer = tk.Frame(self.chat_window, bg=palette["bg"], padx=8, pady=8)
+        self.chat_outer.pack(fill="both", expand=True)
 
-        self.chat_log = tk.Text(
-            frame,
-            width=38,
-            height=11,
-            bg="#fff7e8",
-            fg=INK,
-            relief="flat",
+        self.chat_log_area = tk.Frame(self.chat_outer, bg=palette["bg"], highlightthickness=0, bd=0)
+        self.chat_log_area.pack(fill="both", expand=True)
+
+        self.chat_canvas = tk.Canvas(
+            self.chat_log_area,
+            bg=palette["bg"],
+            highlightthickness=0,
             bd=0,
-            wrap="word",
-            font=("Segoe UI", 10),
-            padx=9,
-            pady=8,
-            state="disabled",
+            width=CHAT_CANVAS_WIDTH,
         )
-        self.chat_log.pack(fill="both", expand=True)
-        self.chat_log.tag_configure("user", foreground="#284f72")
-        self.chat_log.tag_configure("ming", foreground="#7a1f24")
-        self.chat_log.tag_configure("system", foreground="#6b6257")
+        self.chat_scroll = tk.Scrollbar(
+            self.chat_log_area,
+            orient="vertical",
+            command=self.chat_canvas.yview,
+        )
+        self.chat_canvas.configure(yscrollcommand=self.chat_scroll.set)
+        self.chat_canvas.pack(side="left", fill="both", expand=True)
+        self.chat_scroll.pack(side="right", fill="y")
 
-        controls = tk.Frame(frame, bg="#241817")
-        controls.pack(fill="x", pady=(8, 0))
+        self.chat_messages_frame = tk.Frame(self.chat_canvas, bg=palette["bg"])
+        self.chat_messages_window = self.chat_canvas.create_window(
+            (0, 0), window=self.chat_messages_frame, anchor="nw", width=CHAT_CANVAS_WIDTH,
+        )
+        self.chat_messages_frame.bind(
+            "<Configure>",
+            lambda _event: self.chat_canvas.configure(
+                scrollregion=self.chat_canvas.bbox("all")
+            ),
+        )
+        self.chat_canvas.bind(
+            "<Configure>",
+            lambda event: self.chat_canvas.itemconfigure(
+                self.chat_messages_window, width=event.width
+            ),
+        )
+        self.chat_canvas.bind_all("<MouseWheel>", self._on_chat_mousewheel)
+
+        self.chat_controls = tk.Frame(self.chat_outer, bg=palette["bg"])
+        self.chat_controls.pack(fill="x", pady=(8, 0))
+        controls = self.chat_controls
 
         self.chat_entry = tk.Entry(
             controls,
-            bg="#fff7e8",
+            bg="white",
             fg=INK,
             relief="flat",
             font=("Segoe UI", 10),
@@ -467,22 +740,56 @@ class MingDesktopAgent:
         )
         self.chat_send_button.pack(side="left", padx=(8, 0))
 
-        self._append_chat_line("밍", "먼저 말해. 듣고 있다.", "ming")
+        self.chat_notice = tk.Label(
+            self.chat_outer,
+            text="⚠ 메시지를 보내면 현재 화면이 캡처되어 OpenAI로 전송됩니다.",
+            bg=palette["bg"],
+            fg=palette["meta_fg"],
+            font=("Segoe UI", 8),
+            anchor="w",
+            justify="left",
+            wraplength=CHAT_CANVAS_WIDTH,
+        )
+        self.chat_notice.pack(fill="x", pady=(6, 0))
+
+        self._append_chat_bubble("ming", "먼저 말해. 듣고 있다.")
         self.chat_entry.focus_set()
         self._say("말해봐")
 
     def _chat_geometry(self) -> str:
-        x = int(min(max(0, self.state.x - 88), max(0, self.screen_w - 360)))
-        y = int(min(max(0, self.state.y - 260), max(0, self.screen_h - 280)))
-        return f"360x280+{x}+{y}"
+        x = int(min(max(0, self.state.x - 110), max(0, self.screen_w - 400)))
+        y = int(min(max(0, self.state.y - 360), max(0, self.screen_h - 380)))
+        return f"400x380+{x}+{y}"
 
     def _close_chat(self) -> None:
+        if self.chat_canvas is not None:
+            try:
+                self.chat_canvas.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
         if self.chat_window and self.chat_window.winfo_exists():
             self.chat_window.destroy()
         self.chat_window = None
-        self.chat_log = None
+        self.chat_outer = None
+        self.chat_log_area = None
+        self.chat_controls = None
+        self.chat_canvas = None
+        self.chat_scroll = None
+        self.chat_messages_frame = None
+        self.chat_messages_window = None
         self.chat_entry = None
         self.chat_send_button = None
+        self.chat_notice = None
+        self.chat_rows.clear()
+        self.pending_unread_labels.clear()
+
+    def _on_chat_mousewheel(self, event: tk.Event) -> None:
+        if self.chat_canvas is None:
+            return
+        try:
+            self.chat_canvas.yview_scroll(int(-event.delta / 120), "units")
+        except tk.TclError:
+            pass
 
     def _send_chat_from_event(self, _event: tk.Event) -> str:
         self.send_chat()
@@ -498,15 +805,19 @@ class MingDesktopAgent:
             return
 
         self.chat_entry.delete(0, "end")
-        self._append_chat_line("나", text, "user")
+        self._append_chat_bubble("user", text)
         self._set_chat_busy(True)
         self._say("보고 듣는 중...", ticks=120)
-        thread = threading.Thread(target=self._run_chat_worker, args=(text, self._style_chat_context()), daemon=True)
+        thread = threading.Thread(
+            target=self._run_chat_worker,
+            args=(text, self._style_chat_context(), self.cat_style.value, self.cat_name),
+            daemon=True,
+        )
         thread.start()
 
-    def _run_chat_worker(self, text: str, style_context: str) -> None:
+    def _run_chat_worker(self, text: str, style_context: str, style_key: str, cat_name: str) -> None:
         try:
-            message = self.chat.reply(text, style_context)
+            message = self.chat.reply(text, style_context, style_key, cat_name)
         except Exception:
             message = "통신이 삐끗했다"
         self.chat_results.put(message)
@@ -518,7 +829,7 @@ class MingDesktopAgent:
             except queue.Empty:
                 return
             self._set_chat_busy(False)
-            self._append_chat_line("밍", message, "ming")
+            self._append_chat_bubble("ming", message)
             self._say(message, ticks=220)
             if self.chat_window and self.chat_window.winfo_exists() and self.chat_entry:
                 self.chat_entry.focus_set()
@@ -531,14 +842,107 @@ class MingDesktopAgent:
         if self.chat_send_button:
             self.chat_send_button.configure(state=state, text="대기" if busy else "보내기")
 
-    def _append_chat_line(self, speaker: str, message: str, tag: str) -> None:
-        if not self.chat_log:
+    def _append_chat_bubble(self, who: str, message: str) -> None:
+        if not (self.chat_messages_frame and self.chat_canvas):
             return
-        self.chat_log.configure(state="normal")
-        self.chat_log.insert("end", f"{speaker}: ", tag)
-        self.chat_log.insert("end", f"{message}\n")
-        self.chat_log.configure(state="disabled")
-        self.chat_log.see("end")
+        is_user = who == "user"
+        palette = chat_palette(self.cat_style)
+        bubble_bg = palette["bubble_user"] if is_user else palette["bubble_ming"]
+        bubble_fg = palette["user_fg"] if is_user else palette["ming_fg"]
+        timestamp = datetime.now().strftime("%H:%M")
+
+        row = tk.Frame(self.chat_messages_frame, bg=palette["bg"])
+        row.pack(fill="x", padx=8, pady=4)
+
+        bubble = tk.Label(
+            row,
+            text=message,
+            bg=bubble_bg,
+            fg=bubble_fg,
+            font=("Segoe UI", 10),
+            wraplength=CHAT_BUBBLE_MAX_WIDTH,
+            justify="left",
+            padx=10,
+            pady=6,
+            bd=0,
+            relief="flat",
+            anchor="w",
+        )
+
+        meta = tk.Frame(row, bg=palette["bg"])
+        time_label = tk.Label(
+            meta,
+            text=timestamp,
+            bg=palette["bg"],
+            fg=palette["meta_fg"],
+            font=("Segoe UI", 7),
+        )
+
+        unread_label: tk.Label | None = None
+        if is_user:
+            unread_label = tk.Label(
+                meta,
+                text="1",
+                bg=palette["bg"],
+                fg=palette.get("unread_fg", CHAT_UNREAD_FG_DEFAULT),
+                font=("Segoe UI", 8, "bold"),
+            )
+            unread_label.pack(side="top", anchor="e")
+            time_label.pack(side="top", anchor="e", pady=(1, 0))
+            # 오른쪽 정렬 + meta 가 bubble 의 왼쪽에 오도록 (카카오톡 레이아웃)
+            bubble.pack(side="right")
+            meta.pack(side="right", padx=(0, 4), anchor="s")
+            self.pending_unread_labels.append(unread_label)
+        else:
+            time_label.pack(side="bottom", anchor="w")
+            bubble.pack(side="left")
+            meta.pack(side="left", padx=(4, 0), anchor="s")
+            self._mark_all_unread_as_read()
+
+        self.chat_rows.append({
+            "row": row,
+            "bubble": bubble,
+            "meta": meta,
+            "time": time_label,
+            "unread": unread_label,
+            "who": who,
+        })
+
+        self.chat_messages_frame.update_idletasks()
+        self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all"))
+        self.chat_canvas.yview_moveto(1.0)
+
+    def _mark_all_unread_as_read(self) -> None:
+        for label in self.pending_unread_labels:
+            try:
+                label.configure(text="")
+            except tk.TclError:
+                pass
+        self.pending_unread_labels.clear()
+
+    def _apply_chat_palette(self) -> None:
+        if not (self.chat_window and self.chat_window.winfo_exists()):
+            return
+        palette = chat_palette(self.cat_style)
+        bg = palette["bg"]
+        self.chat_window.configure(bg=bg)
+        for frame in (self.chat_outer, self.chat_log_area, self.chat_controls, self.chat_messages_frame):
+            if frame is not None:
+                frame.configure(bg=bg)
+        if self.chat_canvas is not None:
+            self.chat_canvas.configure(bg=bg)
+        if self.chat_notice is not None:
+            self.chat_notice.configure(bg=bg, fg=palette["meta_fg"])
+        for row in self.chat_rows:
+            who = row["who"]
+            bubble_bg = palette["bubble_user"] if who == "user" else palette["bubble_ming"]
+            bubble_fg = palette["user_fg"] if who == "user" else palette["ming_fg"]
+            row["row"].configure(bg=bg)
+            row["meta"].configure(bg=bg)
+            row["bubble"].configure(bg=bubble_bg, fg=bubble_fg)
+            row["time"].configure(bg=bg, fg=palette["meta_fg"])
+            if row["unread"] is not None:
+                row["unread"].configure(bg=bg, fg=palette.get("unread_fg", CHAT_UNREAD_FG_DEFAULT))
 
     def _show_menu(self, event: tk.Event) -> None:
         self.menu.tk_popup(event.x_root, event.y_root)
@@ -549,6 +953,7 @@ class MingDesktopAgent:
         self.state.drag_dy = event.y
         self.state.mood = Mood.POUNCE
         self.state.vx = 0
+        self._show_mark(MARK_QUESTION, ticks=30)
         self._say(self._style_line("drag"))
 
     def _drag(self, event: tk.Event) -> None:
@@ -590,6 +995,11 @@ class MingDesktopAgent:
 
         if state.shiver_ticks > 0:
             state.shiver_ticks -= 1
+
+        if state.mark_ticks > 0:
+            state.mark_ticks -= 1
+            if state.mark_ticks <= 0:
+                state.mark_kind = ""
 
         if state.mood_ticks <= 0:
             self._roll_next_mood()
@@ -729,6 +1139,7 @@ class MingDesktopAgent:
             self._draw_tail(bob, step, sleepy)
             self._draw_body(bob, step, sleepy)
             self._draw_head(bob, step, sleepy)
+        self._draw_mark()
         self._draw_speech()
 
     def _pick_sprite_pose(self, sleepy: bool, moving: bool) -> str:
@@ -1247,6 +1658,66 @@ class MingDesktopAgent:
         self._line(62 + tilt, eye_y - 4, 54 + tilt, eye_y - 8, width=3, fill=rim, capstyle="round")
         self._line(115 + tilt, eye_y - 4, 123 + tilt, eye_y - 8, width=3, fill=rim, capstyle="round")
         self._line(68 + tilt, eye_y - 4, 80 + tilt, eye_y - 6, width=2, fill="#ffffff", capstyle="round")
+
+    def _draw_mark(self) -> None:
+        if self.state.mark_ticks <= 0 or not self.state.mark_kind:
+            return
+        cx = self.width / 2
+        kind = self.state.mark_kind
+        if kind == MARK_ALERT:
+            self._draw_mark_alert(cx)
+        elif kind == MARK_QUESTION:
+            self._draw_mark_question(cx)
+        elif kind == MARK_HEART:
+            self._draw_mark_heart(cx)
+        elif kind == MARK_ZZZ:
+            self._draw_mark_zzz(cx)
+
+    def _draw_mark_alert(self, cx: float) -> None:
+        # 4 ticks 주기로 깜빡임 (대략 8 Hz)
+        if (self.state.mark_ticks // 4) % 2 == 0:
+            return
+        self.canvas.create_oval(
+            cx - 11, 4, cx + 11, 38,
+            fill=ALERT_RED, outline="white", width=2,
+        )
+        self.canvas.create_text(
+            cx, 21, text="!", fill="white", font=("Segoe UI", 18, "bold"),
+        )
+
+    def _draw_mark_question(self, cx: float) -> None:
+        if (self.state.mark_ticks // 4) % 2 == 0:
+            return
+        self.canvas.create_oval(
+            cx - 11, 4, cx + 11, 38,
+            fill=MARK_QUESTION_YELLOW, outline="white", width=2,
+        )
+        self.canvas.create_text(
+            cx, 21, text="?", fill="white", font=("Segoe UI", 16, "bold"),
+        )
+
+    def _draw_mark_heart(self, cx: float) -> None:
+        pulse = 1.0 + math.sin(self.state.frame / 6) * 0.18
+        size = max(11, int(16 * pulse))
+        self.canvas.create_text(
+            cx + 10, 14, text="♥",
+            fill=MARK_HEART_PINK, font=("Segoe UI", max(9, size - 4), "bold"),
+        )
+        self.canvas.create_text(
+            cx - 6, 22, text="♥",
+            fill=MARK_HEART_PINK, font=("Segoe UI", size, "bold"),
+        )
+
+    def _draw_mark_zzz(self, cx: float) -> None:
+        glyphs = [(-2, 34, 11), (8, 22, 13), (18, 10, 15)]
+        for index, (offset_x, base_y, size) in enumerate(glyphs):
+            wave = math.sin((self.state.frame + index * 9) / 11) * 1.6
+            self.canvas.create_text(
+                cx + offset_x, base_y + wave,
+                text="Z",
+                fill=MARK_ZZZ_GRAY,
+                font=("Segoe UI", size, "bold"),
+            )
 
     def _draw_speech(self) -> None:
         if not self.state.speech:
